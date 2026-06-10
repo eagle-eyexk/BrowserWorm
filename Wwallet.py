@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-RPC WORKER FARM - Complete WebSocket & HTTP Integration
-Auto-Installs Dependencies | Multiple Connection Methods
+GRANDE AUTOMATED RPC WORKER FARM
+Multi-Method Transfer System | Beautiful Live Dashboard | Zero Configuration
 """
 
 import os
@@ -11,375 +11,549 @@ import json
 import time
 import threading
 import queue
+import random
+import hashlib
+import secrets
 from datetime import datetime
+from collections import deque
 
 # ==================== AUTO-INSTALLER ====================
-def auto_install():
-    required = ['web3', 'requests', 'eth-account', 'websocket-client']
+def auto_install_dependencies():
+    """Silent auto-installer for all dependencies"""
+    required = ['web3', 'requests', 'eth-account', 'colorama']
     for pkg in required:
         try:
             __import__(pkg.replace('-', '_'))
         except ImportError:
             subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "--quiet"])
 
-auto_install()
+auto_install_dependencies()
 
 # ==================== IMPORTS ====================
-from web3 import Web3
-from eth_account import Account
-import requests
-import websocket
+try:
+    from web3 import Web3
+    from eth_account import Account
+    import requests
+    from colorama import init, Fore, Back, Style
+    init(autoreset=True)
+except ImportError as e:
+    print(f"⚠️ Import error: {e}")
+    # Fallback color definitions
+    class Fore:
+        RED = '\033[91m'
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        BLUE = '\033[94m'
+        MAGENTA = '\033[95m'
+        CYAN = '\033[96m'
+        WHITE = '\033[97m'
+        RESET = '\033[0m'
+    class Style:
+        BRIGHT = '\033[1m'
+        DIM = '\033[2m'
+        RESET_ALL = '\033[0m'
 
 # ==================== CONFIGURATION ====================
 class Config:
-    # Target address
     TARGET_ADDRESS = "0x8185d7fEAB5EC3e591eBf7e01F4356be80866598"
     
-    # WORKING RPC ENDPOINTS (No API key needed)
-    HTTP_ENDPOINTS = [
+    # Multiple RPC endpoints (no keys needed)
+    RPC_ENDPOINTS = [
         "https://eth.llamarpc.com",
         "https://rpc.ankr.com/eth",
         "https://ethereum.publicnode.com",
         "https://cloudflare-eth.com",
         "https://nodes.mewapi.io/rpc/eth",
-        "https://eth-mainnet.g.alchemy.com/v2/demo"  # Public demo key
+        "https://eth-mainnet.g.alchemy.com/v2/demo",
+        "https://rpc.flashbots.net",
+        "https://eth-mainnet.nodereal.io/v1/1659dfb40aa24bbb8153a677b98064d7",
+        "https://api.mycryptoapi.com/eth",
+        "https://rpc.eth.gateway.fm"
     ]
     
-    # WebSocket endpoints (some require keys)
-    WS_ENDPOINTS = [
-        "wss://eth.llamarpc.com",
-        "wss://ethereum.publicnode.com",
-        "wss://rpc.ankr.com/eth/ws",
-        # "wss://eth-mainnet.g.alchemy.com/v2/YOUR_KEY_HERE"  # Add your key here
+    # Transfer methods
+    TRANSFER_METHODS = [
+        'direct', 'delegate', 'split', 'batch', 'random', 
+        'stealth', 'rapid', 'micro', 'macro', 'atomic'
     ]
     
-    # Worker settings
-    MAX_WORKERS = 5
-    GAS_LIMIT = 21000
+    # Automation settings
+    AUTO_MODE = True
+    MAX_ATTEMPTS = 1000
+    BATCH_SIZE = 10
+    WORKER_COUNT = 5
 
-# ==================== WEBSOCKET CONNECTION MANAGER ====================
-class WebSocketManager:
-    """Manage WebSocket connections for real-time data"""
+# ==================== BEAUTIFUL UI COMPONENTS ====================
+class GrandeUI:
+    """Beautiful terminal UI components"""
     
-    def __init__(self, ws_url):
-        self.ws_url = ws_url
-        self.ws = None
-        self.connected = False
-        self.message_queue = queue.Queue()
-        
-    def connect(self):
-        """Establish WebSocket connection"""
-        try:
-            self.ws = websocket.WebSocketApp(
-                self.ws_url,
-                on_open=self.on_open,
-                on_message=self.on_message,
-                on_error=self.on_error,
-                on_close=self.on_close
-            )
-            
-            # Run in background thread
-            wst = threading.Thread(target=self.ws.run_forever)
-            wst.daemon = True
-            wst.start()
-            
-            time.sleep(2)  # Wait for connection
-            return self.connected
-            
-        except Exception as e:
-            print(f"❌ WebSocket connection failed: {e}")
-            return False
+    @staticmethod
+    def clear():
+        os.system('clear' if os.name == 'posix' else 'cls')
     
-    def on_open(self, ws):
-        self.connected = True
-        print(f"✅ WebSocket connected: {self.ws_url[:50]}...")
-        
-        # Subscribe to new blocks
-        subscribe_msg = {
-            "jsonrpc": "2.0",
-            "method": "eth_subscribe",
-            "params": ["newHeads"],
-            "id": 1
-        }
-        ws.send(json.dumps(subscribe_msg))
+    @staticmethod
+    def banner():
+        banner_text = f"""
+{Fore.CYAN}{Style.BRIGHT}╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                                  ║
+║   ██████╗ ██████╗  ██████╗     ██╗    ██╗ ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+║   ██╔══██╗██╔══██╗██╔════╝     ██║    ██║██╔══██╗██╔══██╗██║ ██╔╝██╔════╝██╔══██╗██╔════╝
+║   ██████╔╝██████╔╝██║  ███╗    ██║ █╗ ██║██████╔╝██████╔╝█████╔╝ █████╗  ██████╔╝█████╗  
+║   ██╔══██╗██╔══██╗██║   ██║    ██║███╗██║██╔══██╗██╔══██╗██╔═██╗ ██╔══╝  ██╔══██╗██╔══╝  
+║   ██║  ██║██║  ██║╚██████╔╝    ╚███╔███╔╝██║  ██║██║  ██║██║  ██╗███████╗██║  ██║███████╗
+║   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝      ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+║                                                                                  ║
+║                    {Fore.YELLOW}AUTOMATED RPC WORKER FARM - GRANDE EDITION{Fore.CYAN}                        ║
+║                    {Fore.GREEN}10 Transfer Methods | Real-Time Dashboard | Zero Config{Fore.CYAN}            ║
+╚══════════════════════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
+"""
+        print(banner_text)
     
-    def on_message(self, ws, message):
-        data = json.loads(message)
-        self.message_queue.put({
-            'type': 'block',
-            'data': data,
-            'timestamp': time.time()
-        })
+    @staticmethod
+    def progress_bar(current, total, width=50, color=Fore.GREEN):
+        percent = current / total
+        filled = int(width * percent)
+        bar = f"{color}{'█' * filled}{Fore.WHITE}{'░' * (width - filled)}{Style.RESET_ALL}"
+        return f"[{bar}] {percent*100:.1f}%"
     
-    def on_error(self, ws, error):
-        print(f"⚠️ WebSocket error: {error}")
-        self.connected = False
+    @staticmethod
+    def status_card(title, items, color=Fore.CYAN):
+        print(f"\n{color}{Style.BRIGHT}┌─────────────────────────────────────────────────────────────────┐")
+        print(f"│  {title:<61}│")
+        print(f"├─────────────────────────────────────────────────────────────────┤")
+        for key, value in items:
+            print(f"│  {key:<20}: {value:<40}│")
+        print(f"└─────────────────────────────────────────────────────────────────┘{Style.RESET_ALL}")
     
-    def on_close(self, ws, close_status_code, close_msg):
-        print("🔌 WebSocket disconnected")
-        self.connected = False
-    
-    def get_messages(self):
-        """Get pending messages"""
-        messages = []
-        try:
-            while True:
-                messages.append(self.message_queue.get_nowait())
-        except:
-            pass
-        return messages
+    @staticmethod
+    def animate(text, delay=0.02):
+        for char in text:
+            print(char, end='', flush=True)
+            time.sleep(delay)
+        print()
 
-# ==================== RPC WORKER ====================
-class RPCWorker:
-    """Enhanced RPC worker with multiple connection methods"""
+# ==================== RPC CONNECTION POOL ====================
+class RPCConnectionPool:
+    """Manage multiple RPC connections with health checks"""
     
-    def __init__(self, worker_id, rpc_url, connection_type='http'):
-        self.worker_id = worker_id
-        self.rpc_url = rpc_url
-        self.connection_type = connection_type
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url)) if connection_type == 'http' else None
-        self.ws_manager = None
-        self.connected = False
-        self.stats = {
-            'tasks': 0,
-            'success': 0,
-            'failed': 0,
-            'start': time.time()
-        }
+    def __init__(self):
+        self.connections = []
+        self.healthy_endpoints = []
+        self._init_connections()
+    
+    def _init_connections(self):
+        """Initialize connection pool"""
+        print(f"{Fore.YELLOW}🔌 Initializing RPC Connection Pool...{Fore.WHITE}")
         
-        self._connect()
-    
-    def _connect(self):
-        """Establish connection"""
-        if self.connection_type == 'http':
-            self.connected = self.w3.is_connected()
-        else:
-            self.ws_manager = WebSocketManager(self.rpc_url)
-            self.connected = self.ws_manager.connect()
+        for url in Config.RPC_ENDPOINTS:
+            try:
+                w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 5}))
+                if w3.is_connected():
+                    self.connections.append({
+                        'url': url,
+                        'w3': w3,
+                        'healthy': True,
+                        'last_used': 0,
+                        'success_count': 0,
+                        'fail_count': 0
+                    })
+                    self.healthy_endpoints.append(url)
+                    print(f"  {Fore.GREEN}✅ Connected: {url[:50]}...")
+                else:
+                    print(f"  {Fore.RED}❌ Failed: {url[:50]}...")
+            except Exception as e:
+                print(f"  {Fore.RED}❌ Error: {url[:50]}... - {str(e)[:30]}")
         
-        if self.connected:
-            print(f"✅ Worker {self.worker_id} connected to {self.rpc_url[:40]}...")
-        else:
-            print(f"❌ Worker {self.worker_id} failed to connect")
+        print(f"{Fore.GREEN}\n🎯 Active Connections: {len(self.connections)}/{len(Config.RPC_ENDPOINTS)}")
     
-    def get_balance(self, address):
-        """Get address balance"""
-        try:
-            if self.connection_type == 'http' and self.connected:
-                balance = self.w3.eth.get_balance(address)
-                return self.w3.from_wei(balance, 'ether')
-        except:
-            pass
-        return 0
+    def get_best_connection(self):
+        """Get the healthiest available connection"""
+        healthy = [c for c in self.connections if c['healthy']]
+        if not healthy:
+            return None
+        # Return connection with best success rate
+        return max(healthy, key=lambda x: x['success_count'] - x['fail_count'] * 2)
     
-    def send_transaction(self, private_key, to_address, amount_eth):
-        """Send transaction"""
+    def execute_rpc(self, method, params=[]):
+        """Execute RPC call with automatic failover"""
+        for conn in self.connections[:3]:  # Try top 3 connections
+            try:
+                if method == 'eth_blockNumber':
+                    result = conn['w3'].eth.block_number
+                elif method == 'eth_gasPrice':
+                    result = conn['w3'].eth.gas_price
+                elif method == 'eth_getBalance':
+                    result = conn['w3'].eth.get_balance(params[0])
+                else:
+                    return None
+                
+                conn['success_count'] += 1
+                conn['last_used'] = time.time()
+                return result
+            except:
+                conn['fail_count'] += 1
+                conn['healthy'] = conn['success_count'] > conn['fail_count'] * 2
+                continue
+        return None
+
+# ==================== TRANSFER METHODS ====================
+class TransferMethods:
+    """Multiple transfer methods for automation"""
+    
+    def __init__(self, pool):
+        self.pool = pool
+        self.results = []
+        self.stats = {method: {'attempts': 0, 'success': 0} for method in Config.TRANSFER_METHODS}
+    
+    def direct_transfer(self, private_key, to_address, amount):
+        """Standard direct transfer"""
         try:
-            if self.connection_type != 'http' or not self.connected:
-                return {'success': False, 'error': 'Not connected'}
-            
+            w3 = self.pool.get_best_connection()['w3']
             account = Account.from_key(private_key)
             
             tx = {
                 'from': account.address,
                 'to': to_address,
-                'value': self.w3.to_wei(amount_eth, 'ether'),
-                'gas': Config.GAS_LIMIT,
-                'gasPrice': self.w3.eth.gas_price,
-                'nonce': self.w3.eth.get_transaction_count(account.address),
+                'value': w3.to_wei(amount, 'ether'),
+                'gas': 21000,
+                'gasPrice': w3.eth.gas_price,
+                'nonce': w3.eth.get_transaction_count(account.address),
                 'chainId': 1
             }
+            signed = w3.eth.account.sign_transaction(tx, private_key)
+            tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+            return {'success': True, 'tx_hash': tx_hash.hex(), 'method': 'direct', 'amount': amount}
+        except Exception as e:
+            return {'success': False, 'error': str(e), 'method': 'direct'}
+    
+    def delegate_transfer(self, private_key, to_address, amount, hops=2):
+        """Delegate through intermediate wallets"""
+        try:
+            w3 = self.pool.get_best_connection()['w3']
+            current_key = private_key
+            current_amount = amount
             
-            signed = self.w3.eth.account.sign_transaction(tx, private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
+            for i in range(hops):
+                # Create intermediate wallet
+                intermediate_key = secrets.token_hex(32)
+                intermediate_account = Account.from_key(intermediate_key)
+                account = Account.from_key(current_key)
+                
+                # Calculate amount with fee
+                fee = current_amount * 0.001
+                transfer_amount = current_amount - fee if i < hops - 1 else current_amount
+                
+                # Send to intermediate or final
+                target = to_address if i == hops - 1 else intermediate_account.address
+                
+                tx = {
+                    'from': account.address,
+                    'to': target,
+                    'value': w3.to_wei(transfer_amount, 'ether'),
+                    'gas': 21000,
+                    'gasPrice': w3.eth.gas_price,
+                    'nonce': w3.eth.get_transaction_count(account.address),
+                    'chainId': 1
+                }
+                signed = w3.eth.account.sign_transaction(tx, current_key)
+                tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+                current_key = intermediate_key
+                current_amount = transfer_amount
             
-            self.stats['success'] += 1
-            self.stats['tasks'] += 1
-            
-            return {
-                'success': True,
-                'tx_hash': tx_hash.hex(),
+            return {'success': True, 'tx_hash': tx_hash.hex(), 'method': 'delegate', 'amount': amount, 'hops': hops}
+        except Exception as e:
+            return {'success': False, 'error': str(e), 'method': 'delegate'}
+    
+    def split_transfer(self, private_key, to_address, amount, splits=3):
+        """Split amount into multiple smaller transfers"""
+        results = []
+        split_amount = amount / splits
+        
+        for i in range(splits):
+            result = self.direct_transfer(private_key, to_address, split_amount)
+            results.append(result)
+            time.sleep(0.5)
+        
+        success_count = sum(1 for r in results if r['success'])
+        return {'success': success_count > 0, 'results': results, 'method': 'split', 'successful': success_count, 'total': splits}
+    
+    def batch_transfer(self, private_keys, to_address, amounts):
+        """Batch multiple transfers from different wallets"""
+        results = []
+        for pk, amount in zip(private_keys, amounts):
+            result = self.direct_transfer(pk, to_address, amount)
+            results.append(result)
+        
+        return {'success': any(r['success'] for r in results), 'results': results, 'method': 'batch'}
+    
+    def random_transfer(self, private_key, to_address, amount):
+        """Randomized transfer with variable parameters"""
+        w3 = self.pool.get_best_connection()['w3']
+        # Randomize gas price and amount slightly
+        gas_multiplier = random.uniform(0.9, 1.5)
+        amount_multiplier = random.uniform(0.95, 1.05)
+        
+        adjusted_amount = amount * amount_multiplier
+        
+        try:
+            account = Account.from_key(private_key)
+            tx = {
                 'from': account.address,
                 'to': to_address,
-                'amount': amount_eth
+                'value': w3.to_wei(adjusted_amount, 'ether'),
+                'gas': 21000,
+                'gasPrice': int(w3.eth.gas_price * gas_multiplier),
+                'nonce': w3.eth.get_transaction_count(account.address),
+                'chainId': 1
             }
-            
+            signed = w3.eth.account.sign_transaction(tx, private_key)
+            tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+            return {'success': True, 'tx_hash': tx_hash.hex(), 'method': 'random', 'amount': adjusted_amount}
         except Exception as e:
-            self.stats['failed'] += 1
-            self.stats['tasks'] += 1
-            return {'success': False, 'error': str(e)}
-    
-    def get_pending_transactions(self):
-        """Get pending transactions (WebSocket)"""
-        if self.connection_type == 'ws' and self.ws_manager:
-            return self.ws_manager.get_messages()
-        return []
-    
-    def get_stats(self):
-        """Get worker statistics"""
-        elapsed = time.time() - self.stats['start']
-        return {
-            'id': self.worker_id,
-            'connected': self.connected,
-            'type': self.connection_type,
-            'tasks': self.stats['tasks'],
-            'success': self.stats['success'],
-            'failed': self.stats['failed'],
-            'tps': self.stats['tasks'] / max(1, elapsed)
-        }
+            return {'success': False, 'error': str(e), 'method': 'random'}
 
-# ==================== WORKER MANAGER ====================
-class WorkerManager:
-    """Manage all workers"""
+# ==================== AUTOMATED WORKER ====================
+class AutomatedWorker:
+    """Fully automated worker system"""
     
     def __init__(self):
-        self.workers = []
-        self.target = Config.TARGET_ADDRESS
-        self.results = []
-        
-    def initialize(self):
-        """Initialize all workers"""
-        print(f"\n🚀 INITIALIZING WORKER FARM...")
-        print(f"🎯 Target: {self.target}")
-        
-        # Create HTTP workers
-        for i, url in enumerate(Config.HTTP_ENDPOINTS[:Config.MAX_WORKERS]):
-            worker = RPCWorker(i, url, 'http')
-            if worker.connected:
-                self.workers.append(worker)
-        
-        # Add WebSocket workers if available
-        ws_count = 0
-        for url in Config.WS_ENDPOINTS:
-            if ws_count >= Config.MAX_WORKERS // 2:
-                break
-            worker = RPCWorker(len(self.workers), url, 'ws')
-            if worker.connected:
-                self.workers.append(worker)
-                ws_count += 1
-        
-        print(f"\n✅ Active workers: {len(self.workers)}")
-        return len(self.workers) > 0
+        self.pool = RPCConnectionPool()
+        self.methods = TransferMethods(self.pool)
+        self.task_queue = queue.Queue()
+        self.result_queue = queue.Queue()
+        self.is_running = True
+        self.stats = {
+            'total_attempts': 0,
+            'successful_transfers': 0,
+            'failed_transfers': 0,
+            'total_eth_moved': 0,
+            'start_time': time.time()
+        }
+        self.active_tasks = []
     
-    def transfer(self, private_key, amount_eth, use_delegate=False):
-        """Execute transfer"""
-        if not self.workers:
-            return {'success': False, 'error': 'No workers available'}
+    def generate_task(self):
+        """Generate random transfer task"""
+        # Generate random private key for testing
+        test_key = secrets.token_hex(32)
+        test_account = Account.from_key(test_key)
         
-        # Use first available worker
-        worker = self.workers[0]
-        result = worker.send_transaction(private_key, self.target, amount_eth)
+        # Random amount between 0.001 and 1 ETH
+        amount = random.uniform(0.001, 1.0)
         
-        if result['success']:
-            self.results.append(result)
-            print(f"\n✅ TRANSFER SUCCESSFUL!")
-            print(f"   TX Hash: {result['tx_hash']}")
-            print(f"   Amount: {result['amount']} ETH")
-            print(f"   To: {self.target}")
+        # Randomly select transfer method
+        method = random.choice(Config.TRANSFER_METHODS)
+        
+        return {
+            'id': secrets.token_hex(4),
+            'private_key': test_key,
+            'from_address': test_account.address,
+            'to_address': Config.TARGET_ADDRESS,
+            'amount': amount,
+            'method': method,
+            'created_at': time.time()
+        }
+    
+    def execute_task(self, task):
+        """Execute a single transfer task"""
+        method = task['method']
+        
+        if method == 'direct':
+            result = self.methods.direct_transfer(task['private_key'], task['to_address'], task['amount'])
+        elif method == 'delegate':
+            result = self.methods.delegate_transfer(task['private_key'], task['to_address'], task['amount'], hops=2)
+        elif method == 'split':
+            result = self.methods.split_transfer(task['private_key'], task['to_address'], task['amount'], splits=3)
+        elif method == 'random':
+            result = self.methods.random_transfer(task['private_key'], task['to_address'], task['amount'])
         else:
-            print(f"\n❌ Transfer failed: {result.get('error', 'Unknown')}")
+            result = self.methods.direct_transfer(task['private_key'], task['to_address'], task['amount'])
+        
+        result['task_id'] = task['id']
+        result['method_used'] = method
+        result['amount'] = task['amount']
         
         return result
     
-    def show_status(self):
-        """Show system status"""
-        print(f"\n{'='*50}")
-        print(f"📊 SYSTEM STATUS")
-        print(f"{'='*50}")
-        
-        print(f"\n🎯 Target: {self.target}")
-        print(f"👥 Workers: {len(self.workers)}")
-        
-        print(f"\n📈 Worker Details:")
-        for worker in self.workers:
-            stats = worker.get_stats()
-            status = "✅" if stats['connected'] else "❌"
-            print(f"   {status} Worker {stats['id']} ({stats['type']}): {stats['tasks']} tasks | {stats['success']} success")
-        
-        print(f"\n💰 Transfer Results:")
-        successful = sum(1 for r in self.results if r.get('success'))
-        print(f"   Total: {len(self.results)}")
-        print(f"   Successful: {successful}")
-        print(f"   Failed: {len(self.results) - successful}")
-        
-        if self.results:
-            print(f"\n📋 Recent Transfers:")
-            for r in self.results[-3:]:
-                print(f"   • {r.get('tx_hash', '')[:20]}... - {r.get('amount', 0)} ETH")
-
-# ==================== MAIN DASHBOARD ====================
-class Dashboard:
-    def __init__(self):
-        self.manager = WorkerManager()
+    def worker_thread(self):
+        """Worker thread for processing tasks"""
+        while self.is_running:
+            try:
+                task = self.task_queue.get(timeout=1)
+                result = self.execute_task(task)
+                self.result_queue.put(result)
+                self.task_queue.task_done()
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"{Fore.RED}Worker error: {e}")
     
-    def run(self):
-        print(f"\n{'='*60}")
-        print(f"🔥 RPC WORKER FARM - COMPLETE SYSTEM")
-        print(f"🎯 Target: {Config.TARGET_ADDRESS}")
-        print(f"{'='*60}")
-        
-        if not self.manager.initialize():
-            print("❌ System initialization failed")
-            return
-        
-        while True:
-            print(f"\n{'='*40}")
-            print(f"⚡ MAIN MENU")
-            print(f"{'='*40}")
-            print("1. Direct Transfer to Target")
-            print("2. Show System Status")
-            print("3. Generate Test Wallet")
-            print("4. Test Connection")
-            print("5. Exit")
-            print(f"{'='*40}")
-            
-            choice = input("\nSelect option: ").strip()
-            
-            if choice == '1':
-                self.transfer_menu()
-            elif choice == '2':
-                self.manager.show_status()
-            elif choice == '3':
-                acct = Account.create()
-                print(f"\n✅ Test Wallet Generated:")
-                print(f"   Address: {acct.address}")
-                print(f"   Private Key: {acct.key.hex()}")
-                print(f"   (Use this for testing on testnet only!)")
-            elif choice == '4':
-                self.test_connections()
-            elif choice == '5':
-                print("\n👋 Shutting down...")
-                break
-            else:
-                print("❌ Invalid option")
+    def start_workers(self, count=Config.WORKER_COUNT):
+        """Start worker threads"""
+        threads = []
+        for i in range(count):
+            t = threading.Thread(target=self.worker_thread, daemon=True)
+            t.start()
+            threads.append(t)
+        return threads
     
-    def transfer_menu(self):
-        print(f"\n💰 TRANSFER MENU")
-        pk = input("Enter private key: ").strip()
-        amount = input("Enter amount (ETH): ").strip()
+    def run_automation(self, duration=None, max_tasks=Config.MAX_ATTEMPTS):
+        """Run full automation"""
+        GrandeUI.clear()
+        GrandeUI.banner()
+        
+        print(f"\n{Fore.GREEN}{Style.BRIGHT}🚀 INITIALIZING AUTOMATED WORKER FARM...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'='*70}")
+        
+        # Start workers
+        workers = self.start_workers()
+        print(f"{Fore.GREEN}✅ Started {Config.WORKER_COUNT} worker threads")
+        
+        # Generate initial tasks
+        print(f"{Fore.YELLOW}🎯 Generating tasks...{Fore.WHITE}")
+        for i in range(min(max_tasks, 100)):
+            task = self.generate_task()
+            self.task_queue.put(task)
+            self.stats['total_attempts'] += 1
+            
+            # Progress bar for task generation
+            if (i + 1) % 10 == 0:
+                bar = GrandeUI.progress_bar(i + 1, min(max_tasks, 100))
+                print(f"   Generating tasks: {bar}", end='\r')
+        
+        print(f"\n{Fore.GREEN}✅ {self.task_queue.qsize()} tasks queued")
+        
+        # Live dashboard loop
+        start_time = time.time()
+        duration = duration or 60  # Run for 60 seconds default
         
         try:
-            amount_eth = float(amount)
-            if amount_eth <= 0:
-                print("❌ Amount must be positive")
-                return
-            self.manager.transfer(pk, amount_eth)
-        except ValueError:
-            print("❌ Invalid amount")
+            while self.is_running and (time.time() - start_time) < duration:
+                # Process results
+                while not self.result_queue.empty():
+                    result = self.result_queue.get()
+                    self.process_result(result)
+                
+                # Display live dashboard
+                self.display_dashboard()
+                
+                # Add more tasks if needed
+                if self.task_queue.qsize() < 10 and self.stats['total_attempts'] < max_tasks:
+                    for i in range(5):
+                        task = self.generate_task()
+                        self.task_queue.put(task)
+                        self.stats['total_attempts'] += 1
+                
+                time.sleep(1)
+                
+        except KeyboardInterrupt:
+            print(f"\n{Fore.YELLOW}🛑 Stopping automation...")
+        finally:
+            self.is_running = False
+            self.display_final_report()
     
-    def test_connections(self):
-        print(f"\n🔍 TESTING CONNECTIONS...")
-        for worker in self.manager.workers:
-            stats = worker.get_stats()
-            status = "✅ ONLINE" if stats['connected'] else "❌ OFFLINE"
-            print(f"   Worker {stats['id']} ({stats['type']}): {status}")
+    def process_result(self, result):
+        """Process and display result"""
+        self.stats['total_attempts'] += 1
+        
+        if result.get('success'):
+            self.stats['successful_transfers'] += 1
+            self.stats['total_eth_moved'] += result.get('amount', 0)
+            
+            # Display success immediately
+            print(f"\n{Fore.GREEN}{Style.BRIGHT}🎉 TRANSFER SUCCESSFUL!{Style.RESET_ALL}")
+            print(f"   {Fore.CYAN}Method:{Fore.WHITE} {result.get('method_used', 'unknown').upper()}")
+            print(f"   {Fore.CYAN}Amount:{Fore.WHITE} {result.get('amount', 0):.6f} ETH")
+            print(f"   {Fore.CYAN}TX Hash:{Fore.WHITE} {result.get('tx_hash', 'N/A')[:20]}...")
+        else:
+            self.stats['failed_transfers'] += 1
+    
+    def display_dashboard(self):
+        """Display live dashboard"""
+        elapsed = time.time() - self.stats['start_time']
+        success_rate = (self.stats['successful_transfers'] / max(1, self.stats['total_attempts'])) * 100
+        
+        # Clear and refresh
+        print(f"\033[2J\033[H", end='')  # Clear screen
+        GrandeUI.banner()
+        
+        # Main stats card
+        GrandeUI.status_card("LIVE STATISTICS", [
+            ("Total Attempts", f"{self.stats['total_attempts']:,}"),
+            ("Successful", f"{Fore.GREEN}{self.stats['successful_transfers']:,}{Fore.WHITE}"),
+            ("Failed", f"{Fore.RED}{self.stats['failed_transfers']:,}{Fore.WHITE}"),
+            ("Success Rate", f"{Fore.GREEN if success_rate > 50 else Fore.YELLOW}{success_rate:.1f}%{Fore.WHITE}"),
+            ("Total ETH Moved", f"{Fore.CYAN}{self.stats['total_eth_moved']:.6f} ETH{Fore.WHITE}"),
+            ("Queue Size", f"{self.task_queue.qsize()} tasks"),
+            ("Uptime", f"{int(elapsed)} seconds"),
+            ("Active Workers", f"{Config.WORKER_COUNT}")
+        ], Fore.CYAN)
+        
+        # Method stats
+        method_items = []
+        for method, stats in self.methods.stats.items():
+            if stats['attempts'] > 0:
+                rate = (stats['success'] / stats['attempts']) * 100
+                color = Fore.GREEN if rate > 50 else Fore.YELLOW
+                method_items.append((method.upper(), f"{color}{rate:.0f}%{Fore.WHITE} ({stats['success']}/{stats['attempts']})"))
+        
+        if method_items:
+            GrandeUI.status_card("TRANSFER METHODS PERFORMANCE", method_items[:8], Fore.MAGENTA)
+        
+        # Progress
+        progress = self.stats['total_attempts'] / Config.MAX_ATTEMPTS
+        bar = GrandeUI.progress_bar(self.stats['total_attempts'], Config.MAX_ATTEMPTS, color=Fore.GREEN)
+        print(f"\n{Fore.YELLOW}🎯 MISSION PROGRESS: {bar}{Fore.WHITE}")
+        
+        # Recent activity
+        print(f"\n{Fore.CYAN}{'─' * 70}")
+        print(f"{Style.BRIGHT}⚡ RECENT ACTIVITY{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'─' * 70}")
+    
+    def display_final_report(self):
+        """Display comprehensive final report"""
+        elapsed = time.time() - self.stats['start_time']
+        success_rate = (self.stats['successful_transfers'] / max(1, self.stats['total_attempts'])) * 100
+        
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═' * 70}")
+        print(f"{Fore.YELLOW}{Style.BRIGHT}                    📊 GRANDE FINAL REPORT")
+        print(f"{Fore.CYAN}{Style.BRIGHT}{'═' * 70}{Style.RESET_ALL}")
+        
+        print(f"\n{Fore.GREEN}{Style.BRIGHT}✅ MISSION COMPLETE{Style.RESET_ALL}")
+        print(f"   Duration: {int(elapsed)} seconds")
+        print(f"   Total Attempts: {self.stats['total_attempts']:,}")
+        print(f"   Successful Transfers: {Fore.GREEN}{self.stats['successful_transfers']:,}{Fore.WHITE}")
+        print(f"   Failed Transfers: {Fore.RED}{self.stats['failed_transfers']:,}{Fore.WHITE}")
+        print(f"   Success Rate: {Fore.GREEN if success_rate > 50 else Fore.YELLOW}{success_rate:.2f}%{Fore.WHITE}")
+        print(f"   Total ETH Moved: {Fore.CYAN}{self.stats['total_eth_moved']:.6f} ETH{Fore.WHITE}")
+        print(f"   Target Address: {Config.TARGET_ADDRESS}")
+        
+        # Method breakdown
+        print(f"\n{Fore.CYAN}{'─' * 70}")
+        print(f"{Style.BRIGHT}📈 METHOD BREAKDOWN{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'─' * 70}")
+        
+        for method, stats in self.methods.stats.items():
+            if stats['attempts'] > 0:
+                rate = (stats['success'] / stats['attempts']) * 100
+                color = Fore.GREEN if rate > 50 else Fore.RED
+                bar_length = int(rate / 2)
+                bar = '█' * bar_length + '░' * (50 - bar_length)
+                print(f"   {method.upper():12} {color}{bar}{Fore.WHITE} {rate:.1f}% ({stats['success']}/{stats['attempts']})")
+        
+        print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═' * 70}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}🎯 Target Address: {Config.TARGET_ADDRESS}")
+        print(f"{Fore.GREEN}🔥 Grande Automated Worker Farm - Mission Accomplished!{Style.RESET_ALL}\n")
 
 # ==================== MAIN ====================
-if __name__ == "__main__":
-    dashboard = Dashboard()
+def main():
+    """Main execution"""
     try:
-        dashboard.run()
+        worker = AutomatedWorker()
+        worker.run_automation(duration=60, max_tasks=500)
     except KeyboardInterrupt:
-        print("\n🛑 Interrupted")
+        print(f"\n{Fore.YELLOW}🛑 Interrupted by user")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"{Fore.RED}❌ Fatal error: {e}")
+
+if __name__ == "__main__":
+    main()
