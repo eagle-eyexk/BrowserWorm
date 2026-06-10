@@ -1,203 +1,200 @@
 #!/usr/bin/env python3
 """
-AUTO-CONTAINED RPC WORKER FARM - Self-Sufficient System
-Auto-Installs Dependencies | Creates Own Network | Complete Tool Suite
-Target: 0x8185d7fEAB5EC3e591eBf7e01F4356be80866598
+RPC WORKER FARM - Complete WebSocket & HTTP Integration
+Auto-Installs Dependencies | Multiple Connection Methods
 """
 
 import os
 import sys
 import subprocess
-import importlib
-import pkgutil
-from pathlib import Path
+import json
+import time
+import threading
+import queue
+from datetime import datetime
 
 # ==================== AUTO-INSTALLER ====================
-def auto_install_dependencies():
-    """Automatically install all required dependencies"""
+def auto_install():
+    required = ['web3', 'requests', 'eth-account', 'websocket-client']
+    for pkg in required:
+        try:
+            __import__(pkg.replace('-', '_'))
+        except ImportError:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg, "--quiet"])
+
+auto_install()
+
+# ==================== IMPORTS ====================
+from web3 import Web3
+from eth_account import Account
+import requests
+import websocket
+
+# ==================== CONFIGURATION ====================
+class Config:
+    # Target address
+    TARGET_ADDRESS = "0x8185d7fEAB5EC3e591eBf7e01F4356be80866598"
     
-    required_packages = [
-        'web3',
-        'requests',
-        'eth-account',
-        'cryptography',
-        'colorama',
-        'termcolor',
-        'tqdm'
+    # WORKING RPC ENDPOINTS (No API key needed)
+    HTTP_ENDPOINTS = [
+        "https://eth.llamarpc.com",
+        "https://rpc.ankr.com/eth",
+        "https://ethereum.publicnode.com",
+        "https://cloudflare-eth.com",
+        "https://nodes.mewapi.io/rpc/eth",
+        "https://eth-mainnet.g.alchemy.com/v2/demo"  # Public demo key
     ]
     
-    print("🔧 AUTO-INSTALLING DEPENDENCIES...")
+    # WebSocket endpoints (some require keys)
+    WS_ENDPOINTS = [
+        "wss://eth.llamarpc.com",
+        "wss://ethereum.publicnode.com",
+        "wss://rpc.ankr.com/eth/ws",
+        # "wss://eth-mainnet.g.alchemy.com/v2/YOUR_KEY_HERE"  # Add your key here
+    ]
     
-    for package in required_packages:
-        try:
-            importlib.import_module(package.replace('-', '_'))
-            print(f"✅ {package} already installed")
-        except ImportError:
-            print(f"📦 Installing {package}...")
-            try:
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install", package, 
-                    "--quiet", "--no-warn-script-location",
-                    "--default-timeout=100"
-                ])
-                print(f"✅ {package} installed successfully")
-            except Exception as e:
-                print(f"⚠️  Could not install {package}: {e}")
-                # Try alternative installation method
-                try:
-                    subprocess.check_call([
-                        sys.executable, "-m", "pip", "install", package,
-                        "--user", "--quiet"
-                    ])
-                    print(f"✅ {package} installed with --user flag")
-                except:
-                    print(f"❌ Failed to install {package}")
+    # Worker settings
+    MAX_WORKERS = 5
+    GAS_LIMIT = 21000
 
-# Run auto-installer before anything else
-auto_install_dependencies()
-
-# Now import all modules
-try:
-    import web3
-    from web3 import Web3
-    from eth_account import Account
-    import requests
-    from cryptography.fernet import Fernet
-    from colorama import init, Fore, Back, Style
-    from termcolor import colored
-    from tqdm import tqdm
+# ==================== WEBSOCKET CONNECTION MANAGER ====================
+class WebSocketManager:
+    """Manage WebSocket connections for real-time data"""
     
-    init(autoreset=True)
-    print("✅ All modules loaded successfully")
-    
-except ImportError as e:
-    print(f"❌ Module import error: {e}")
-    print("🔄 Retrying installation...")
-    auto_install_dependencies()
-    
-    # Second attempt
-    try:
-        from web3 import Web3
-        from eth_account import Account
-        import requests
-        from colorama import init, Fore, Back, Style
-        init(autoreset=True)
-        print("✅ Modules loaded on second attempt")
-    except ImportError as e2:
-        print(f"❌ Critical error: {e2}")
-        print("⚠️  Some features may be limited")
-
-# ==================== LOCAL NETWORK CREATION ====================
-class LocalNetwork:
-    """Create and manage local blockchain network"""
-    
-    def __init__(self):
-        self.network_active = False
-        self.local_rpc = None
-        self.accounts = []
+    def __init__(self, ws_url):
+        self.ws_url = ws_url
+        self.ws = None
+        self.connected = False
+        self.message_queue = queue.Queue()
         
-    def create_local_network(self):
-        """Create a local ganache-like network"""
-        print(f"\n{Fore.CYAN}🌐 CREATING LOCAL BLOCKCHAIN NETWORK...")
-        
+    def connect(self):
+        """Establish WebSocket connection"""
         try:
-            # Try to use ganache if available
-            from eth_account import Account
-            from eth_account._utils.signing import sign_transaction_dict
+            self.ws = websocket.WebSocketApp(
+                self.ws_url,
+                on_open=self.on_open,
+                on_message=self.on_message,
+                on_error=self.on_error,
+                on_close=self.on_close
+            )
             
-            # Create local accounts
-            for i in range(10):
-                acct = Account.create()
-                self.accounts.append({
-                    'address': acct.address,
-                    'private_key': acct.key.hex(),
-                    'balance': 1000 * (i + 1)  # Fake balance
-                })
+            # Run in background thread
+            wst = threading.Thread(target=self.ws.run_forever)
+            wst.daemon = True
+            wst.start()
             
-            # Setup local RPC endpoint
-            self.local_rpc = "http://localhost:8545"
-            self.network_active = True
-            
-            print(f"{Fore.GREEN}✅ Local network created with {len(self.accounts)} accounts")
-            print(f"{Fore.YELLOW}📡 Local RPC: {self.local_rpc}")
-            
-            return True
+            time.sleep(2)  # Wait for connection
+            return self.connected
             
         except Exception as e:
-            print(f"{Fore.RED}❌ Local network creation failed: {e}")
+            print(f"❌ WebSocket connection failed: {e}")
             return False
     
-    def get_account(self, index=0):
-        """Get account from local network"""
-        if self.accounts and index < len(self.accounts):
-            return self.accounts[index]
-        return None
+    def on_open(self, ws):
+        self.connected = True
+        print(f"✅ WebSocket connected: {self.ws_url[:50]}...")
+        
+        # Subscribe to new blocks
+        subscribe_msg = {
+            "jsonrpc": "2.0",
+            "method": "eth_subscribe",
+            "params": ["newHeads"],
+            "id": 1
+        }
+        ws.send(json.dumps(subscribe_msg))
     
-    def fund_account(self, address, amount_eth=100):
-        """Fund an account on local network"""
-        print(f"{Fore.GREEN}💰 Funding account {address[:10]}... with {amount_eth} ETH")
-        return True
+    def on_message(self, ws, message):
+        data = json.loads(message)
+        self.message_queue.put({
+            'type': 'block',
+            'data': data,
+            'timestamp': time.time()
+        })
+    
+    def on_error(self, ws, error):
+        print(f"⚠️ WebSocket error: {error}")
+        self.connected = False
+    
+    def on_close(self, ws, close_status_code, close_msg):
+        print("🔌 WebSocket disconnected")
+        self.connected = False
+    
+    def get_messages(self):
+        """Get pending messages"""
+        messages = []
+        try:
+            while True:
+                messages.append(self.message_queue.get_nowait())
+        except:
+            pass
+        return messages
 
 # ==================== RPC WORKER ====================
 class RPCWorker:
-    """Individual RPC worker for blockchain operations"""
+    """Enhanced RPC worker with multiple connection methods"""
     
-    def __init__(self, worker_id, rpc_url):
+    def __init__(self, worker_id, rpc_url, connection_type='http'):
         self.worker_id = worker_id
-        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
-        self.connected = self.w3.is_connected()
+        self.rpc_url = rpc_url
+        self.connection_type = connection_type
+        self.w3 = Web3(Web3.HTTPProvider(rpc_url)) if connection_type == 'http' else None
+        self.ws_manager = None
+        self.connected = False
         self.stats = {
-            'tasks_processed': 0,
-            'successful_transfers': 0,
-            'failed_transfers': 0,
-            'total_gas_used': 0,
-            'start_time': time.time()
+            'tasks': 0,
+            'success': 0,
+            'failed': 0,
+            'start': time.time()
         }
-        self.is_running = True
+        
+        self._connect()
+    
+    def _connect(self):
+        """Establish connection"""
+        if self.connection_type == 'http':
+            self.connected = self.w3.is_connected()
+        else:
+            self.ws_manager = WebSocketManager(self.rpc_url)
+            self.connected = self.ws_manager.connect()
         
         if self.connected:
-            print(f"{Fore.GREEN}✅ Worker {worker_id} connected to {rpc_url[:30]}...")
+            print(f"✅ Worker {self.worker_id} connected to {self.rpc_url[:40]}...")
         else:
-            print(f"{Fore.RED}❌ Worker {worker_id} failed to connect")
-    
-    def get_gas_price(self):
-        """Get optimized gas price"""
-        try:
-            gas_price = self.w3.eth.gas_price
-            gas_price_gwei = self.w3.from_wei(gas_price, 'gwei')
-            return gas_price
-        except:
-            return self.w3.to_wei(10, 'gwei')
+            print(f"❌ Worker {self.worker_id} failed to connect")
     
     def get_balance(self, address):
         """Get address balance"""
         try:
-            return self.w3.eth.get_balance(address)
+            if self.connection_type == 'http' and self.connected:
+                balance = self.w3.eth.get_balance(address)
+                return self.w3.from_wei(balance, 'ether')
         except:
-            return 0
+            pass
+        return 0
     
-    def execute_transfer(self, from_private_key, to_address, amount_eth):
-        """Execute transfer transaction"""
+    def send_transaction(self, private_key, to_address, amount_eth):
+        """Send transaction"""
         try:
-            account = Account.from_key(from_private_key)
+            if self.connection_type != 'http' or not self.connected:
+                return {'success': False, 'error': 'Not connected'}
             
-            # Build transaction
+            account = Account.from_key(private_key)
+            
             tx = {
                 'from': account.address,
                 'to': to_address,
                 'value': self.w3.to_wei(amount_eth, 'ether'),
-                'gas': 21000,
-                'gasPrice': self.get_gas_price(),
+                'gas': Config.GAS_LIMIT,
+                'gasPrice': self.w3.eth.gas_price,
                 'nonce': self.w3.eth.get_transaction_count(account.address),
                 'chainId': 1
             }
             
-            # Sign and send
-            signed = self.w3.eth.account.sign_transaction(tx, from_private_key)
+            signed = self.w3.eth.account.sign_transaction(tx, private_key)
             tx_hash = self.w3.eth.send_raw_transaction(signed.rawTransaction)
             
-            self.stats['successful_transfers'] += 1
-            self.stats['tasks_processed'] += 1
+            self.stats['success'] += 1
+            self.stats['tasks'] += 1
             
             return {
                 'success': True,
@@ -208,331 +205,181 @@ class RPCWorker:
             }
             
         except Exception as e:
-            self.stats['failed_transfers'] += 1
-            self.stats['tasks_processed'] += 1
+            self.stats['failed'] += 1
+            self.stats['tasks'] += 1
             return {'success': False, 'error': str(e)}
+    
+    def get_pending_transactions(self):
+        """Get pending transactions (WebSocket)"""
+        if self.connection_type == 'ws' and self.ws_manager:
+            return self.ws_manager.get_messages()
+        return []
     
     def get_stats(self):
         """Get worker statistics"""
-        elapsed = time.time() - self.stats['start_time']
+        elapsed = time.time() - self.stats['start']
         return {
-            'worker_id': self.worker_id,
+            'id': self.worker_id,
             'connected': self.connected,
-            'processed': self.stats['tasks_processed'],
-            'successful': self.stats['successful_transfers'],
-            'failed': self.stats['failed_transfers'],
-            'uptime': elapsed,
-            'tps': self.stats['tasks_processed'] / max(1, elapsed)
+            'type': self.connection_type,
+            'tasks': self.stats['tasks'],
+            'success': self.stats['success'],
+            'failed': self.stats['failed'],
+            'tps': self.stats['tasks'] / max(1, elapsed)
         }
 
-# ==================== DELEGATE CHAIN ====================
-class DelegateChain:
-    """Delegate chain for transaction routing"""
+# ==================== WORKER MANAGER ====================
+class WorkerManager:
+    """Manage all workers"""
     
     def __init__(self):
-        self.chains = []
-        self.active_chain = None
-        
-    def create_chain(self, depth=3):
-        """Create delegate chain"""
-        chain = []
-        for i in range(depth):
-            acct = Account.create()
-            chain.append({
-                'level': i,
-                'address': acct.address,
-                'private_key': acct.key.hex(),
-                'balance': 0
-            })
-        
-        self.chains.append(chain)
-        self.active_chain = chain
-        return chain
-    
-    def get_chain_balance(self, chain, w3):
-        """Get total chain balance"""
-        total = 0
-        for node in chain:
-            try:
-                balance = w3.eth.get_balance(node['address'])
-                total += balance
-            except:
-                pass
-        return total
-
-# ==================== TRANSFER CONTROLLER ====================
-class TransferController:
-    """Main transfer controller"""
-    
-    def __init__(self):
-        self.target = "0x8185d7fEAB5EC3e591eBf7e01F4356be80866598"
         self.workers = []
+        self.target = Config.TARGET_ADDRESS
         self.results = []
-        self.local_network = LocalNetwork()
-        self.delegate_chain = DelegateChain()
         
-    def initialize_system(self):
-        """Initialize complete system"""
-        print(f"\n{Fore.CYAN}{'='*60}")
-        print(f"{Fore.YELLOW}🚀 RPC WORKER FARM - COMPLETE SYSTEM")
-        print(f"{Fore.CYAN}{'='*60}")
+    def initialize(self):
+        """Initialize all workers"""
+        print(f"\n🚀 INITIALIZING WORKER FARM...")
+        print(f"🎯 Target: {self.target}")
         
-        # Create local network
-        self.local_network.create_local_network()
-        
-        # RPC endpoints (public + local)
-        rpc_endpoints = [
-            "https://eth.llamarpc.com",
-            "https://rpc.ankr.com/eth",
-            "https://ethereum.publicnode.com",
-            "https://cloudflare-eth.com",
-        ]
-        
-        if self.local_network.local_rpc:
-            rpc_endpoints.insert(0, self.local_network.local_rpc)
-        
-        # Create workers
-        print(f"\n{Fore.CYAN}🔧 INITIALIZING WORKERS...")
-        for i in range(min(5, len(rpc_endpoints))):
-            worker = RPCWorker(i, rpc_endpoints[i])
+        # Create HTTP workers
+        for i, url in enumerate(Config.HTTP_ENDPOINTS[:Config.MAX_WORKERS]):
+            worker = RPCWorker(i, url, 'http')
             if worker.connected:
                 self.workers.append(worker)
         
-        print(f"{Fore.GREEN}✅ Active workers: {len(self.workers)}")
+        # Add WebSocket workers if available
+        ws_count = 0
+        for url in Config.WS_ENDPOINTS:
+            if ws_count >= Config.MAX_WORKERS // 2:
+                break
+            worker = RPCWorker(len(self.workers), url, 'ws')
+            if worker.connected:
+                self.workers.append(worker)
+                ws_count += 1
         
-        # Create delegate chain
-        print(f"\n{Fore.CYAN}🔗 CREATING DELEGATE CHAIN...")
-        chain = self.delegate_chain.create_chain(3)
-        print(f"{Fore.GREEN}✅ Delegate chain with {len(chain)} hops created")
-        
+        print(f"\n✅ Active workers: {len(self.workers)}")
         return len(self.workers) > 0
     
-    def direct_transfer(self, private_key, amount_eth):
-        """Direct transfer to target"""
+    def transfer(self, private_key, amount_eth, use_delegate=False):
+        """Execute transfer"""
         if not self.workers:
-            print(f"{Fore.RED}❌ No workers available")
-            return None
+            return {'success': False, 'error': 'No workers available'}
         
+        # Use first available worker
         worker = self.workers[0]
-        result = worker.execute_transfer(private_key, self.target, amount_eth)
+        result = worker.send_transaction(private_key, self.target, amount_eth)
         
         if result['success']:
-            print(f"{Fore.GREEN}✅ Transfer successful!")
+            self.results.append(result)
+            print(f"\n✅ TRANSFER SUCCESSFUL!")
             print(f"   TX Hash: {result['tx_hash']}")
             print(f"   Amount: {result['amount']} ETH")
-            self.results.append(result)
+            print(f"   To: {self.target}")
         else:
-            print(f"{Fore.RED}❌ Transfer failed: {result.get('error', 'Unknown error')}")
+            print(f"\n❌ Transfer failed: {result.get('error', 'Unknown')}")
         
         return result
     
-    def delegate_transfer(self, root_private_key, amount_eth):
-        """Transfer through delegate chain"""
-        if not self.delegate_chain.active_chain:
-            print(f"{Fore.RED}❌ No delegate chain available")
-            return None
-        
-        chain = self.delegate_chain.active_chain
-        current_amount = amount_eth
-        results = []
-        
-        print(f"{Fore.YELLOW}🔄 Processing delegate chain...")
-        
-        for i, node in enumerate(chain):
-            # Determine next address
-            if i < len(chain) - 1:
-                next_address = chain[i + 1]['address']
-            else:
-                next_address = self.target
-            
-            # Calculate fee (except last hop)
-            if i < len(chain) - 1:
-                fee = current_amount * 0.001  # 0.1% fee
-                transfer_amount = current_amount - fee
-            else:
-                transfer_amount = current_amount
-            
-            # Execute transfer
-            worker = self.workers[i % len(self.workers)]
-            result = worker.execute_transfer(node['private_key'], next_address, transfer_amount)
-            
-            if result['success']:
-                print(f"{Fore.GREEN}   ✓ Hop {i+1}: {node['address'][:10]}... -> {next_address[:10]}... ({transfer_amount:.6f} ETH)")
-                results.append(result)
-                current_amount = transfer_amount
-            else:
-                print(f"{Fore.RED}   ✗ Hop {i+1} failed: {result.get('error', 'Unknown')}")
-                break
-        
-        return results
-    
-    def generate_test_wallet(self):
-        """Generate test wallet"""
-        acct = Account.create()
-        return {
-            'address': acct.address,
-            'private_key': acct.key.hex(),
-            'balance': 0
-        }
-    
     def show_status(self):
         """Show system status"""
-        print(f"\n{Fore.CYAN}{'='*50}")
-        print(f"{Fore.YELLOW}📊 SYSTEM STATUS")
-        print(f"{Fore.CYAN}{'='*50}")
+        print(f"\n{'='*50}")
+        print(f"📊 SYSTEM STATUS")
+        print(f"{'='*50}")
         
-        # Network status
-        print(f"\n{Fore.GREEN}🌐 Network Status:")
-        print(f"   Local Network: {'✅ Active' if self.local_network.network_active else '❌ Inactive'}")
-        print(f"   Local RPC: {self.local_network.local_rpc or 'None'}")
+        print(f"\n🎯 Target: {self.target}")
+        print(f"👥 Workers: {len(self.workers)}")
         
-        # Worker status
-        print(f"\n{Fore.GREEN}👥 Worker Status:")
+        print(f"\n📈 Worker Details:")
         for worker in self.workers:
             stats = worker.get_stats()
-            print(f"   Worker {worker.worker_id}: {stats['processed']} tasks | {stats['successful']} success | {stats['tps']:.1f} tps")
+            status = "✅" if stats['connected'] else "❌"
+            print(f"   {status} Worker {stats['id']} ({stats['type']}): {stats['tasks']} tasks | {stats['success']} success")
         
-        # Transfer results
-        print(f"\n{Fore.GREEN}💰 Transfer Results:")
+        print(f"\n💰 Transfer Results:")
         successful = sum(1 for r in self.results if r.get('success'))
-        print(f"   Total Transfers: {len(self.results)}")
+        print(f"   Total: {len(self.results)}")
         print(f"   Successful: {successful}")
         print(f"   Failed: {len(self.results) - successful}")
         
-        # Delegate chain
-        if self.delegate_chain.active_chain:
-            print(f"\n{Fore.GREEN}🔗 Delegate Chain:")
-            for node in self.delegate_chain.active_chain:
-                print(f"   Level {node['level']}: {node['address'][:15]}...")
+        if self.results:
+            print(f"\n📋 Recent Transfers:")
+            for r in self.results[-3:]:
+                print(f"   • {r.get('tx_hash', '')[:20]}... - {r.get('amount', 0)} ETH")
 
 # ==================== MAIN DASHBOARD ====================
-class MainDashboard:
-    """Main interactive dashboard"""
-    
+class Dashboard:
     def __init__(self):
-        self.controller = TransferController()
-        
+        self.manager = WorkerManager()
+    
     def run(self):
-        """Run main dashboard"""
-        print(f"\n{Fore.CYAN}{'='*60}")
-        print(f"{Fore.YELLOW}🔥 RPC WORKER FARM - COMPLETE SYSTEM")
-        print(f"{Fore.YELLOW}🎯 Target: 0x8185d7fEAB5EC3e591eBf7e01F4356be80866598")
-        print(f"{Fore.CYAN}{'='*60}")
+        print(f"\n{'='*60}")
+        print(f"🔥 RPC WORKER FARM - COMPLETE SYSTEM")
+        print(f"🎯 Target: {Config.TARGET_ADDRESS}")
+        print(f"{'='*60}")
         
-        # Initialize system
-        if not self.controller.initialize_system():
-            print(f"{Fore.RED}❌ System initialization failed")
+        if not self.manager.initialize():
+            print("❌ System initialization failed")
             return
         
-        # Interactive menu
         while True:
-            print(f"\n{Fore.CYAN}{'='*50}")
-            print(f"{Fore.YELLOW}⚡ MAIN MENU")
-            print(f"{Fore.CYAN}{'='*50}")
-            print(f"{Fore.GREEN}1.{Fore.WHITE} Direct Transfer to Target")
-            print(f"{Fore.GREEN}2.{Fore.WHITE} Delegate Chain Transfer")
-            print(f"{Fore.GREEN}3.{Fore.WHITE} Generate Test Wallet")
-            print(f"{Fore.GREEN}4.{Fore.WHITE} Show System Status")
-            print(f"{Fore.GREEN}5.{Fore.WHITE} Fund Local Account")
-            print(f"{Fore.GREEN}6.{Fore.WHITE} Exit")
-            print(f"{Fore.CYAN}{'='*50}")
+            print(f"\n{'='*40}")
+            print(f"⚡ MAIN MENU")
+            print(f"{'='*40}")
+            print("1. Direct Transfer to Target")
+            print("2. Show System Status")
+            print("3. Generate Test Wallet")
+            print("4. Test Connection")
+            print("5. Exit")
+            print(f"{'='*40}")
             
-            choice = input(f"\n{Fore.YELLOW}Select option: {Fore.WHITE}").strip()
+            choice = input("\nSelect option: ").strip()
             
             if choice == '1':
-                self.direct_transfer_menu()
+                self.transfer_menu()
             elif choice == '2':
-                self.delegate_transfer_menu()
+                self.manager.show_status()
             elif choice == '3':
-                wallet = self.controller.generate_test_wallet()
-                print(f"\n{Fore.GREEN}✅ Test Wallet Generated:")
-                print(f"   Address: {wallet['address']}")
-                print(f"   Private Key: {wallet['private_key']}")
+                acct = Account.create()
+                print(f"\n✅ Test Wallet Generated:")
+                print(f"   Address: {acct.address}")
+                print(f"   Private Key: {acct.key.hex()}")
+                print(f"   (Use this for testing on testnet only!)")
             elif choice == '4':
-                self.controller.show_status()
+                self.test_connections()
             elif choice == '5':
-                self.fund_account_menu()
-            elif choice == '6':
-                print(f"\n{Fore.YELLOW}👋 Shutting down...")
+                print("\n👋 Shutting down...")
                 break
             else:
-                print(f"{Fore.RED}❌ Invalid option")
+                print("❌ Invalid option")
     
-    def direct_transfer_menu(self):
-        """Direct transfer menu"""
-        print(f"\n{Fore.CYAN}{'='*40}")
-        print(f"{Fore.YELLOW}💰 DIRECT TRANSFER")
-        print(f"{Fore.CYAN}{'='*40}")
-        
-        private_key = input(f"{Fore.WHITE}Enter private key: {Fore.YELLOW}").strip()
-        amount = input(f"{Fore.WHITE}Enter amount (ETH): {Fore.YELLOW}").strip()
+    def transfer_menu(self):
+        print(f"\n💰 TRANSFER MENU")
+        pk = input("Enter private key: ").strip()
+        amount = input("Enter amount (ETH): ").strip()
         
         try:
             amount_eth = float(amount)
             if amount_eth <= 0:
-                print(f"{Fore.RED}❌ Amount must be positive")
+                print("❌ Amount must be positive")
                 return
-            
-            print(f"\n{Fore.YELLOW}🔄 Processing transfer...")
-            result = self.controller.direct_transfer(private_key, amount_eth)
-            
+            self.manager.transfer(pk, amount_eth)
         except ValueError:
-            print(f"{Fore.RED}❌ Invalid amount")
+            print("❌ Invalid amount")
     
-    def delegate_transfer_menu(self):
-        """Delegate transfer menu"""
-        print(f"\n{Fore.CYAN}{'='*40}")
-        print(f"{Fore.YELLOW}🔗 DELEGATE CHAIN TRANSFER")
-        print(f"{Fore.CYAN}{'='*40}")
-        
-        private_key = input(f"{Fore.WHITE}Enter root private key: {Fore.YELLOW}").strip()
-        amount = input(f"{Fore.WHITE}Enter amount (ETH): {Fore.YELLOW}").strip()
-        
-        try:
-            amount_eth = float(amount)
-            if amount_eth <= 0:
-                print(f"{Fore.RED}❌ Amount must be positive")
-                return
-            
-            print(f"\n{Fore.YELLOW}🔄 Processing delegate chain...")
-            results = self.controller.delegate_transfer(private_key, amount_eth)
-            
-            if results:
-                print(f"\n{Fore.GREEN}✅ Delegate chain completed!")
-                print(f"   Total hops: {len(results)}")
-            
-        except ValueError:
-            print(f"{Fore.RED}❌ Invalid amount")
-    
-    def fund_account_menu(self):
-        """Fund account menu"""
-        print(f"\n{Fore.CYAN}{'='*40}")
-        print(f"{Fore.YELLOW}💰 FUND LOCAL ACCOUNT")
-        print(f"{Fore.CYAN}{'='*40}")
-        
-        address = input(f"{Fore.WHITE}Enter address: {Fore.YELLOW}").strip()
-        amount = input(f"{Fore.WHITE}Enter amount (ETH): {Fore.YELLOW}").strip()
-        
-        try:
-            amount_eth = float(amount)
-            self.controller.local_network.fund_account(address, amount_eth)
-        except ValueError:
-            print(f"{Fore.RED}❌ Invalid amount")
+    def test_connections(self):
+        print(f"\n🔍 TESTING CONNECTIONS...")
+        for worker in self.manager.workers:
+            stats = worker.get_stats()
+            status = "✅ ONLINE" if stats['connected'] else "❌ OFFLINE"
+            print(f"   Worker {stats['id']} ({stats['type']}): {status}")
 
-# ==================== MAIN ENTRY ====================
-def main():
-    """Main entry point"""
+# ==================== MAIN ====================
+if __name__ == "__main__":
+    dashboard = Dashboard()
     try:
-        dashboard = MainDashboard()
         dashboard.run()
     except KeyboardInterrupt:
-        print(f"\n{Fore.YELLOW}🛑 Interrupted by user")
+        print("\n🛑 Interrupted")
     except Exception as e:
-        print(f"{Fore.RED}❌ Fatal error: {e}")
-        print(f"{Fore.YELLOW}🔄 Restarting...")
-        time.sleep(2)
-        main()
-
-if __name__ == "__main__":
-    import time
-    main()
+        print(f"❌ Error: {e}")
