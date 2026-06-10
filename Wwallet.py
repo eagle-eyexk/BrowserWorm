@@ -40,15 +40,23 @@ try:
     init(autoreset=True)
 except ImportError as e:
     print(f"⚠️ Import error: {e}")
+    # Fallback color definitions
     class Fore:
-        RED = '\033[91m'; GREEN = '\033[92m'; YELLOW = '\033[93m'
-        BLUE = '\033[94m'; MAGENTA = '\033[95m'; CYAN = '\033[96m'
-        WHITE = '\033[97m'; RESET = '\033[0m'
+        RED = '\033[91m'
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        BLUE = '\033[94m'
+        MAGENTA = '\033[95m'
+        CYAN = '\033[96m'
+        WHITE = '\033[97m'
+        RESET = '\033[0m'
     class Style:
-        BRIGHT = '\033[1m'; DIM = '\033[2m'; RESET_ALL = '\033[0m'
+        BRIGHT = '\033[1m'
+        DIM = '\033[2m'
+        RESET_ALL = '\033[0m'
 
 # ==================== API KEYS CONFIGURATION ====================
-class APIKeys:
+class ApiKeys:
     # Your provided keys
     ETHERSCAN_KEY = "K7NFZ3QVDRHN2GGB9T8CB8IX3FNQA1928E"
     INFURA_KEY = "3e92b28655aa4cb387f7ccfcd6f45af3"
@@ -78,10 +86,10 @@ class APIKeys:
     ]
     
     # Etherscan API for transaction lookup
-    ETHERSCAN_API = f"https://api.etherscan.io/api?apikey={ETHERSCAN_KEY}"
+    ETHERSCAN_API_URL = f"https://api.etherscan.io/api?apikey={ETHERSCAN_KEY}"
 
-# ==================== CONFIGURATION ====================
-class Config:
+# ==================== SYSTEM CONFIGURATION ====================
+class SystemConfig:
     TARGET_ADDRESS = "0x8185d7fEAB5EC3e591eBf7e01F4356be80866598"
     
     # Transfer methods
@@ -158,7 +166,7 @@ class RPCConnectionPool:
     def __init__(self):
         self.connections = []
         self.healthy_endpoints = []
-        self.etherscan = APIKeys.ETHERSCAN_KEY
+        self.etherscan = ApiKeys.ETHERSCAN_KEY
         self._init_connections()
     
     def _init_connections(self):
@@ -167,11 +175,11 @@ class RPCConnectionPool:
         print(f"{Fore.CYAN}{'─' * 70}")
         
         # Show API status
-        print(f"{Fore.GREEN}✅ Infura API Key: {APIKeys.INFURA_KEY[:10]}...")
-        print(f"{Fore.GREEN}✅ Etherscan API Key: {APIKeys.ETHERSCAN_KEY[:10]}...")
+        print(f"{Fore.GREEN}✅ Infura API Key: {ApiKeys.INFURA_KEY[:10]}...")
+        print(f"{Fore.GREEN}✅ Etherscan API Key: {ApiKeys.ETHERSCAN_KEY[:10]}...")
         print(f"{Fore.CYAN}{'─' * 70}")
         
-        for url in Config.RPC_ENDPOINTS:
+        for url in ApiKeys.RPC_ENDPOINTS:
             try:
                 w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 5}))
                 if w3.is_connected():
@@ -204,7 +212,7 @@ class RPCConnectionPool:
                 print(f"  {Fore.RED}❌ Error: {url[:60]}... - {str(e)[:30]}")
         
         print(f"{Fore.CYAN}{'─' * 70}")
-        print(f"{Fore.GREEN}\n🎯 Active Connections: {len(self.connections)}/{len(Config.RPC_ENDPOINTS)}")
+        print(f"{Fore.GREEN}\n🎯 Active Connections: {len(self.connections)}/{len(ApiKeys.RPC_ENDPOINTS)}")
     
     def get_best_connection(self):
         """Get the healthiest available connection"""
@@ -215,7 +223,7 @@ class RPCConnectionPool:
     
     def execute_rpc(self, method, params=[]):
         """Execute RPC call with automatic failover"""
-        for conn in self.connections[:5]:  # Try top 5 connections
+        for conn in self.connections[:5]:
             try:
                 if method == 'eth_blockNumber':
                     result = conn['w3'].eth.block_number
@@ -238,7 +246,7 @@ class RPCConnectionPool:
     def get_transaction_status(self, tx_hash):
         """Get transaction status from Etherscan"""
         try:
-            url = f"{APIKeys.ETHERSCAN_API}&module=transaction&action=gettxreceiptstatus&txhash={tx_hash}"
+            url = f"{ApiKeys.ETHERSCAN_API_URL}&module=transaction&action=gettxreceiptstatus&txhash={tx_hash}"
             response = requests.get(url, timeout=5)
             if response.status_code == 200:
                 data = response.json()
@@ -255,7 +263,7 @@ class TransferMethods:
     def __init__(self, pool):
         self.pool = pool
         self.results = []
-        self.stats = {method: {'attempts': 0, 'success': 0, 'gas_used': 0} for method in Config.TRANSFER_METHODS}
+        self.stats = {method: {'attempts': 0, 'success': 0, 'gas_used': 0} for method in SystemConfig.TRANSFER_METHODS}
     
     def direct_transfer(self, private_key, to_address, amount):
         """Standard direct transfer"""
@@ -268,7 +276,7 @@ class TransferMethods:
                 'from': account.address,
                 'to': to_address,
                 'value': w3.to_wei(amount, 'ether'),
-                'gas': Config.GAS_LIMIT,
+                'gas': SystemConfig.GAS_LIMIT,
                 'gasPrice': gas_price,
                 'nonce': w3.eth.get_transaction_count(account.address),
                 'chainId': 1
@@ -276,7 +284,7 @@ class TransferMethods:
             signed = w3.eth.account.sign_transaction(tx, private_key)
             tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
             
-            self.stats['direct']['gas_used'] += Config.GAS_LIMIT
+            self.stats['direct']['gas_used'] += SystemConfig.GAS_LIMIT
             return {'success': True, 'tx_hash': tx_hash.hex(), 'method': 'direct', 'amount': amount, 'gas_price': w3.from_wei(gas_price, 'gwei')}
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'direct'}
@@ -303,7 +311,7 @@ class TransferMethods:
                     'from': account.address,
                     'to': target,
                     'value': w3.to_wei(transfer_amount, 'ether'),
-                    'gas': Config.GAS_LIMIT,
+                    'gas': SystemConfig.GAS_LIMIT,
                     'gasPrice': gas_price,
                     'nonce': w3.eth.get_transaction_count(account.address),
                     'chainId': 1
@@ -315,7 +323,7 @@ class TransferMethods:
                 current_key = intermediate_key
                 current_amount = transfer_amount
             
-            self.stats['delegate']['gas_used'] += Config.GAS_LIMIT * hops
+            self.stats['delegate']['gas_used'] += SystemConfig.GAS_LIMIT * hops
             return {'success': True, 'tx_hashes': tx_hashes, 'method': 'delegate', 'amount': amount, 'hops': hops}
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'delegate'}
@@ -327,24 +335,24 @@ class TransferMethods:
             account = Account.from_key(private_key)
             
             base_fee = w3.eth.gas_price
-            priority_fee = w3.to_wei(Config.MAX_PRIORITY_FEE, 'gwei')
+            priority_fee = w3.to_wei(SystemConfig.MAX_PRIORITY_FEE, 'gwei')
             max_fee = base_fee + priority_fee
             
             tx = {
                 'from': account.address,
                 'to': to_address,
                 'value': w3.to_wei(amount, 'ether'),
-                'gas': Config.GAS_LIMIT,
+                'gas': SystemConfig.GAS_LIMIT,
                 'maxPriorityFeePerGas': priority_fee,
                 'maxFeePerGas': max_fee,
                 'nonce': w3.eth.get_transaction_count(account.address),
                 'chainId': 1,
-                'type': 2  # EIP-1559
+                'type': 2
             }
             signed = w3.eth.account.sign_transaction(tx, private_key)
             tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
             
-            self.stats['mev']['gas_used'] += Config.GAS_LIMIT
+            self.stats['mev']['gas_used'] += SystemConfig.GAS_LIMIT
             return {'success': True, 'tx_hash': tx_hash.hex(), 'method': 'mev', 'amount': amount}
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'mev'}
@@ -355,14 +363,13 @@ class TransferMethods:
             w3 = self.pool.get_best_connection()['w3']
             account = Account.from_key(private_key)
             
-            # Use higher gas for faster inclusion
             gas_price = int(w3.eth.gas_price * 1.5)
             
             tx = {
                 'from': account.address,
                 'to': to_address,
                 'value': w3.to_wei(amount, 'ether'),
-                'gas': Config.GAS_LIMIT,
+                'gas': SystemConfig.GAS_LIMIT,
                 'gasPrice': gas_price,
                 'nonce': w3.eth.get_transaction_count(account.address),
                 'chainId': 1
@@ -370,7 +377,7 @@ class TransferMethods:
             signed = w3.eth.account.sign_transaction(tx, private_key)
             tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
             
-            self.stats['flash']['gas_used'] += Config.GAS_LIMIT
+            self.stats['flash']['gas_used'] += SystemConfig.GAS_LIMIT
             return {'success': True, 'tx_hash': tx_hash.hex(), 'method': 'flash', 'amount': amount}
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'flash'}
@@ -381,13 +388,12 @@ class TransferMethods:
             w3 = self.pool.get_best_connection()['w3']
             account = Account.from_key(private_key)
             
-            # Frontrun with higher gas
             frontrun_gas = int(w3.eth.gas_price * 1.3)
             tx_front = {
                 'from': account.address,
                 'to': to_address,
                 'value': w3.to_wei(amount * 0.9, 'ether'),
-                'gas': Config.GAS_LIMIT,
+                'gas': SystemConfig.GAS_LIMIT,
                 'gasPrice': frontrun_gas,
                 'nonce': w3.eth.get_transaction_count(account.address),
                 'chainId': 1
@@ -397,12 +403,11 @@ class TransferMethods:
             
             time.sleep(0.5)
             
-            # Backrun with normal gas
             tx_back = {
                 'from': account.address,
                 'to': to_address,
                 'value': w3.to_wei(amount * 0.8, 'ether'),
-                'gas': Config.GAS_LIMIT,
+                'gas': SystemConfig.GAS_LIMIT,
                 'gasPrice': w3.eth.gas_price,
                 'nonce': w3.eth.get_transaction_count(account.address),
                 'chainId': 1
@@ -410,7 +415,7 @@ class TransferMethods:
             signed_back = w3.eth.account.sign_transaction(tx_back, private_key)
             tx_hash_back = w3.eth.send_raw_transaction(signed_back.rawTransaction)
             
-            self.stats['sandwich']['gas_used'] += Config.GAS_LIMIT * 2
+            self.stats['sandwich']['gas_used'] += SystemConfig.GAS_LIMIT * 2
             return {'success': True, 'frontrun': tx_hash_front.hex(), 'backrun': tx_hash_back.hex(), 'method': 'sandwich', 'amount': amount}
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'sandwich'}
@@ -464,13 +469,13 @@ class AutomatedWorker:
         test_key = secrets.token_hex(32)
         test_account = Account.from_key(test_key)
         amount = random.uniform(0.01, 5.0)
-        method = random.choice(Config.TRANSFER_METHODS[:8])  # Use most effective methods
+        method = random.choice(SystemConfig.TRANSFER_METHODS[:8])
         
         return {
             'id': secrets.token_hex(6),
             'private_key': test_key,
             'from_address': test_account.address,
-            'to_address': Config.TARGET_ADDRESS,
+            'to_address': SystemConfig.TARGET_ADDRESS,
             'amount': amount,
             'method': method,
             'created_at': time.time(),
@@ -510,7 +515,7 @@ class AutomatedWorker:
             except Exception as e:
                 print(f"{Fore.RED}Worker {worker_id} error: {e}")
     
-    def start_workers(self, count=Config.WORKER_COUNT):
+    def start_workers(self, count=SystemConfig.WORKER_COUNT):
         """Start worker threads"""
         threads = []
         for i in range(count):
@@ -542,7 +547,7 @@ class AutomatedWorker:
         else:
             self.stats['failed_transfers'] += 1
     
-    def run_automation(self, duration=None, max_tasks=Config.MAX_ATTEMPTS):
+    def run_automation(self, duration=None, max_tasks=SystemConfig.MAX_ATTEMPTS):
         """Run full automation"""
         GrandeUI.clear()
         GrandeUI.banner()
@@ -552,7 +557,7 @@ class AutomatedWorker:
         
         # Start workers
         workers = self.start_workers()
-        print(f"{Fore.GREEN}✅ Started {Config.WORKER_COUNT} premium worker threads")
+        print(f"{Fore.GREEN}✅ Started {SystemConfig.WORKER_COUNT} premium worker threads")
         
         # Generate initial tasks
         print(f"{Fore.YELLOW}🎯 Generating tasks...{Fore.WHITE}")
@@ -570,7 +575,7 @@ class AutomatedWorker:
         
         # Live dashboard loop
         start_time = time.time()
-        duration = duration or 120  # 2 minutes default
+        duration = duration or 120
         
         try:
             last_stats_update = 0
@@ -611,10 +616,10 @@ class AutomatedWorker:
         
         # API Status
         api_items = [
-            ("Infura", f"{Fore.GREEN}✅ ACTIVE{Fore.WHITE} ({APIKeys.INFURA_KEY[:10]}...)"),
-            ("Etherscan", f"{Fore.GREEN}✅ ACTIVE{Fore.WHITE} ({APIKeys.ETHERSCAN_KEY[:10]}...)"),
+            ("Infura", f"{Fore.GREEN}✅ ACTIVE{Fore.WHITE} ({ApiKeys.INFURA_KEY[:10]}...)"),
+            ("Etherscan", f"{Fore.GREEN}✅ ACTIVE{Fore.WHITE} ({ApiKeys.ETHERSCAN_KEY[:10]}...)"),
             ("Alchemy", f"{Fore.GREEN}✅ ACTIVE{Fore.WHITE} (Demo Key)"),
-            ("Active RPCs", f"{Fore.CYAN}{len(self.pool.connections)}/{len(Config.RPC_ENDPOINTS)}{Fore.WHITE}")
+            ("Active RPCs", f"{Fore.CYAN}{len(self.pool.connections)}/{len(ApiKeys.RPC_ENDPOINTS)}{Fore.WHITE}")
         ]
         GrandeUI.status_card("API & CONNECTION STATUS", api_items, Fore.MAGENTA)
         
@@ -628,7 +633,7 @@ class AutomatedWorker:
             ("Value USD", f"{Fore.GREEN}${self.stats['total_eth_moved'] * 3500:,.2f}{Fore.WHITE}"),
             ("Largest Transfer", f"{Fore.YELLOW}{self.stats['largest_amount']:.6f} ETH{Fore.WHITE}"),
             ("Queue Size", f"{self.task_queue.qsize()} tasks"),
-            ("Active Workers", f"{Config.WORKER_COUNT} threads"),
+            ("Active Workers", f"{SystemConfig.WORKER_COUNT} threads"),
             ("Uptime", f"{int(elapsed)} seconds")
         ]
         GrandeUI.status_card("LIVE STATISTICS", stats_items, Fore.CYAN)
@@ -645,14 +650,14 @@ class AutomatedWorker:
             GrandeUI.status_card("TRANSFER METHODS PERFORMANCE", method_items[:10], Fore.MAGENTA)
         
         # Progress
-        progress = self.stats['total_attempts'] / Config.MAX_ATTEMPTS
-        bar = GrandeUI.progress_bar(self.stats['total_attempts'], Config.MAX_ATTEMPTS, color=Fore.GREEN)
+        progress = self.stats['total_attempts'] / SystemConfig.MAX_ATTEMPTS
+        bar = GrandeUI.progress_bar(self.stats['total_attempts'], SystemConfig.MAX_ATTEMPTS, color=Fore.GREEN)
         print(f"\n{Fore.YELLOW}{Style.BRIGHT}🎯 MISSION PROGRESS: {bar}{Style.RESET_ALL}")
         
         # Target info
         print(f"\n{Fore.CYAN}{'─' * 70}")
         print(f"{Style.BRIGHT}🎯 TARGET ADDRESS{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}{Config.TARGET_ADDRESS}{Fore.WHITE}")
+        print(f"{Fore.YELLOW}{SystemConfig.TARGET_ADDRESS}{Fore.WHITE}")
         print(f"{Fore.CYAN}{'─' * 70}")
     
     def display_final_report(self):
@@ -682,8 +687,8 @@ class AutomatedWorker:
         
         print(f"\n{Fore.CYAN}{'─' * 70}")
         print(f"{Style.BRIGHT}🎯 TARGET INFORMATION{Style.RESET_ALL}")
-        print(f"   Address: {Config.TARGET_ADDRESS}")
-        print(f"   Explorer: https://etherscan.io/address/{Config.TARGET_ADDRESS}")
+        print(f"   Address: {SystemConfig.TARGET_ADDRESS}")
+        print(f"   Explorer: https://etherscan.io/address/{SystemConfig.TARGET_ADDRESS}")
         
         # Method breakdown
         print(f"\n{Fore.CYAN}{'─' * 70}")
@@ -701,7 +706,7 @@ class AutomatedWorker:
         
         print(f"\n{Fore.CYAN}{Style.BRIGHT}{'═' * 70}{Style.RESET_ALL}")
         print(f"{Fore.GREEN}{Style.BRIGHT}🔥 Enterprise Grande Worker Farm - Mission Accomplished!{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}💡 Check Etherscan for transaction details: https://etherscan.io/address/{Config.TARGET_ADDRESS}{Style.RESET_ALL}\n")
+        print(f"{Fore.YELLOW}💡 Check Etherscan for transaction details: https://etherscan.io/address/{SystemConfig.TARGET_ADDRESS}{Style.RESET_ALL}\n")
 
 # ==================== MAIN ====================
 def main():
@@ -715,15 +720,15 @@ def main():
         print(f"{Style.RESET_ALL}")
         
         print(f"\n{Fore.YELLOW}🔑 API Keys Loaded:{Fore.WHITE}")
-        print(f"   ├─ Infura API: {APIKeys.INFURA_KEY[:15]}...")
-        print(f"   ├─ Etherscan API: {APIKeys.ETHERSCAN_KEY[:15]}...")
-        print(f"   └─ Target Address: {Config.TARGET_ADDRESS[:30]}...")
+        print(f"   ├─ Infura API: {ApiKeys.INFURA_KEY[:15]}...")
+        print(f"   ├─ Etherscan API: {ApiKeys.ETHERSCAN_KEY[:15]}...")
+        print(f"   └─ Target Address: {SystemConfig.TARGET_ADDRESS[:30]}...")
         
         print(f"\n{Fore.GREEN}Starting enterprise automation in 3 seconds...{Fore.WHITE}")
         time.sleep(3)
         
         worker = AutomatedWorker()
-        worker.run_automation(duration=120, max_tasks=1000)  # 2 minutes, 1000 tasks
+        worker.run_automation(duration=120, max_tasks=1000)
         
     except KeyboardInterrupt:
         print(f"\n{Fore.YELLOW}🛑 Interrupted by user")
